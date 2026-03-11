@@ -1,11 +1,11 @@
-# 🌳 Memory Tree — Hierarchical Memory for AI Agents
+# 🌿 Bonsai Memory — Prune Your AI Agent's Context Window
 
-**Reduce your AI agent's context window token usage by 70-95%.** Memory Tree restructures flat memory files into a domain-based hierarchy that loads a slim index on boot and searches for details on demand.
+**Reduce your AI agent's token usage by 70-95%.** Bonsai Memory restructures flat memory files into a carefully pruned hierarchy — a slim index on boot, domain branches on demand. Like shaping a bonsai: intentional, minimal, nothing wasted.
 
 Built for [OpenClaw](https://openclaw.ai) agents. Works with any LLM agent framework that uses persistent memory files.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/felixsim/memory-tree)](https://github.com/felixsim/memory-tree/releases)
+[![Release](https://img.shields.io/github/v/release/felixsim/bonsai-memory)](https://github.com/felixsim/bonsai-memory/releases)
 
 ---
 
@@ -15,20 +15,20 @@ Every time an AI agent starts a conversation, it loads its memory — everything
 
 Imagine starting every workday by reading your entire diary from cover to cover before answering a single email. That's what your AI agent is doing.
 
-**Memory Tree fixes this.** Instead of one giant memory file, it organizes your agent's knowledge into labeled folders — like going from a single messy notebook to a well-organized filing cabinet. Your agent reads the folder labels on boot (takes seconds, uses minimal tokens), then only opens the specific folder it needs for the current task.
+**Bonsai Memory fixes this.** Instead of one giant memory file, it shapes your agent's knowledge into a pruned tree — a trunk (slim index), branches (domains), and leaves (topic files). Your agent reads the trunk on boot (takes seconds, uses minimal tokens), then grows into the specific branch it needs for the current task.
 
 ### What You Get
 
 - ⚡ **Faster responses** — Less memory to process on every interaction
 - 💰 **Lower API costs** — Fewer tokens per call means lower bills
-- 🧠 **Better reasoning** — Less noise in context means better focus on your actual question
+- 🧠 **Better reasoning** — Less noise in context means sharper focus
 - 🔒 **Zero risk** — Original memory is backed up, one command to rollback
 
 ### How to Use It
 
 Tell your OpenClaw agent:
 
-> *"Restructure your memory using the memory-tree skill."*
+> *"Restructure your memory using the bonsai-memory skill."*
 
 That's it. The agent reads the instructions and does the migration itself. No coding, no terminal commands, no configuration.
 
@@ -65,30 +65,30 @@ LLM agents with persistent memory typically use a flat-file approach: a single `
 
 ### The Solution: Hierarchical Progressive Disclosure
 
-Memory Tree applies a B-tree-inspired indexing strategy to agent memory. Instead of loading all content, the agent traverses a hierarchy:
+Bonsai Memory applies a B-tree-inspired indexing strategy to agent memory. Like a bonsai tree, every branch is intentional — no wild growth, no dead weight. Instead of loading all content, the agent traverses a pruned hierarchy:
 
 ```
                     ┌─────────────────────┐
-    Boot load:      │   Root Index        │  ~400 tokens
-    (every session) │   (domain summaries)│
+    Trunk:          │   Root Index        │  ~400 tokens
+    (every session) │   (domain summaries)│  (always loaded)
                     └────────┬────────────┘
                              │
               ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
+    Branches: ▼              ▼              ▼
         ┌──────────┐  ┌──────────┐  ┌──────────┐
         │ Identity │  │ Business │  │ Infra    │  ~100-200 tokens each
         │ _index   │  │ _index   │  │ _index   │  (loaded on demand)
         └────┬─────┘  └────┬─────┘  └────┬─────┘
              │              │              │
-        ┌────┴────┐    ┌───┴────┐    ┌───┴────┐
-        ▼         ▼    ▼        ▼    ▼        ▼
-    personal  family  company  SEO  services  issues   Full content
-      .md      .md     .md    .md    .md      .md      (loaded on demand)
+    Leaves:  ├────┐    ┌───┴────┐    ┌───┴────┐
+             ▼    ▼    ▼        ▼    ▼        ▼
+         personal family company  SEO services issues   (loaded on demand)
+           .md    .md    .md     .md   .md     .md
 ```
 
-**Maximum traversal depth: 3 reads** for any fact lookup. Worst case token cost per lookup: ~400 (root) + ~150 (domain index) + ~200 (topic file) = **~750 tokens** vs loading the entire 6,000+ token file.
+**Maximum traversal depth: 3 reads** for any fact lookup. Worst case token cost per lookup: ~400 (trunk) + ~150 (branch index) + ~200 (leaf) = **~750 tokens** vs loading the entire 6,000+ token file.
 
-Best case (task doesn't need memory): **~400 tokens**. That's the root index and nothing else.
+Best case (task doesn't need memory): **~400 tokens**. That's the trunk and nothing else.
 
 ### How the Migration Works
 
@@ -140,7 +140,7 @@ Each section is written to `memory/domains/<domain>/<slugified-heading>.md`. The
 
 Indexes are generated at two levels:
 
-**Domain `_index.md`** — For each domain directory:
+**Branch `_index.md`** — For each domain directory:
 ```markdown
 # Business Index
 _Last indexed: 2026-03-11T09:41:41+08:00_
@@ -156,7 +156,7 @@ Domain migration from getoutevents.com to getout.sg completed Feb 2026.
 12 staff members, 3 departments, updated March 2026.
 ```
 
-**Root `_index.md`** — Aggregates all domain indexes:
+**Root `_index.md`** (the trunk) — Aggregates all branches:
 ```markdown
 # Memory Index
 _Last indexed: 2026-03-11T09:41:41+08:00_
@@ -181,27 +181,27 @@ Token estimates use the heuristic `ceil(character_count / 4)`, which is accurate
 
 #### Step 5: MEMORY.md Replacement
 
-The original `MEMORY.md` is backed up to `memory/MEMORY.md.bak`. The root index replaces `MEMORY.md`. This is what the agent loads on boot — typically **~300-500 tokens** regardless of total memory size.
+The original `MEMORY.md` is backed up to `memory/MEMORY.md.bak`. The trunk index replaces `MEMORY.md`. This is what the agent loads on boot — typically **~300-500 tokens** regardless of total memory size.
 
 ### Semantic Search Compatibility
 
-OpenClaw's `memory_search` uses embedding-based semantic search over all `.md` files in the `memory/` directory, recursively. The hierarchical tree structure is fully transparent to the search layer — no configuration changes required. Files at `memory/domains/business/company.md` are indexed exactly the same as a flat `memory/company.md` would be.
+OpenClaw's `memory_search` uses embedding-based semantic search over all `.md` files in the `memory/` directory, recursively. The bonsai structure is fully transparent to the search layer — no configuration changes required. Files at `memory/domains/business/company.md` are indexed exactly the same as a flat `memory/company.md` would be.
 
 This means the agent has **two retrieval paths**:
 
-1. **Structured traversal**: Root → Domain → Topic (for known-category lookups)
-2. **Semantic search**: Direct query across all domain files (for cross-cutting or fuzzy lookups)
+1. **Structured traversal**: Trunk → Branch → Leaf (for known-category lookups)
+2. **Semantic search**: Direct query across all leaf files (for cross-cutting or fuzzy lookups)
 
 Both paths coexist. The hierarchy optimizes boot cost; semantic search handles the long tail.
 
 ### Complexity Analysis
 
-| Operation | Flat file | Memory Tree |
-|-----------|-----------|-------------|
-| Boot load | O(n) — full file | O(1) — root index only (~400 tokens fixed) |
+| Operation | Flat file | Bonsai Memory |
+|-----------|-----------|---------------|
+| Boot load | O(n) — full file | O(1) — trunk only (~400 tokens fixed) |
 | Known-category lookup | O(n) — scan full file | O(1) — 3 reads max (~750 tokens) |
 | Cross-cutting search | O(n) — semantic search | O(n) — semantic search (identical) |
-| Write new fact | O(1) — append to file | O(1) — write to domain file + update index |
+| Write new fact | O(1) — append to file | O(1) — write to leaf + update branch index |
 | Migration | N/A | O(n) — one-time, ~2 minutes |
 
 The tradeoff: cross-cutting semantic search is unchanged (it must scan all files regardless), but the dominant operation — session boot — drops from O(n) to O(1).
@@ -215,7 +215,7 @@ Markdown files are:
 - **Search-compatible** — Works with OpenClaw's existing embedding-based `memory_search`
 - **Zero-dependency** — No server, no connection string, no schema migrations
 
-A vector database solves a different problem (similarity search over embeddings). Memory Tree solves the boot cost problem with zero infrastructure overhead.
+A vector database solves a different problem (similarity search over embeddings). Bonsai Memory solves the boot cost problem with zero infrastructure overhead.
 
 ---
 
@@ -224,11 +224,11 @@ A vector database solves a different problem (similarity search over embeddings)
 ### Option 1: Install as an OpenClaw Skill
 
 ```bash
-mkdir -p ~/.openclaw/workspace/skills/memory-tree
-cp SKILL.md ~/.openclaw/workspace/skills/memory-tree/SKILL.md
+mkdir -p ~/.openclaw/workspace/skills/bonsai-memory
+cp SKILL.md ~/.openclaw/workspace/skills/bonsai-memory/SKILL.md
 ```
 
-Then tell your agent: *"Restructure your memory using the memory-tree skill."*
+Then tell your agent: *"Restructure your memory using the bonsai-memory skill."*
 
 ### Option 2: Manual — Give Your Agent the Instructions
 
@@ -237,8 +237,8 @@ Copy the content of [`SKILL.md`](SKILL.md) into your agent's context and ask it 
 ### Option 3: Download the Skill Package
 
 ```bash
-curl -LO https://github.com/felixsim/memory-tree/releases/download/v1.0.0/memory-tree.skill
-unzip memory-tree.skill -d ~/.openclaw/workspace/skills/memory-tree/
+curl -LO https://github.com/felixsim/bonsai-memory/releases/download/v1.0.0/bonsai-memory.skill
+unzip bonsai-memory.skill -d ~/.openclaw/workspace/skills/bonsai-memory/
 ```
 
 ---
@@ -251,7 +251,7 @@ Works with any AI agent framework that uses file-based persistent memory:
 - **Custom agent setups** — Any framework using markdown for agent memory or context injection.
 - **Multi-agent systems** — Each agent migrates independently.
 
-The migration is **idempotent** — safe to run multiple times. Existing domain files are never overwritten.
+The migration is **idempotent** — safe to run multiple times. Existing leaf files are never overwritten.
 
 ---
 
@@ -260,8 +260,8 @@ The migration is **idempotent** — safe to run multiple times. Existing domain 
 See the [`examples/`](examples/) directory:
 
 - [`before-MEMORY.md`](examples/before-MEMORY.md) — A typical flat memory file
-- [`after-MEMORY.md`](examples/after-MEMORY.md) — The slim root index that replaces it
-- [`after-tree.txt`](examples/after-tree.txt) — The resulting directory structure
+- [`after-MEMORY.md`](examples/after-MEMORY.md) — The slim trunk index that replaces it
+- [`after-tree.txt`](examples/after-tree.txt) — The resulting bonsai structure
 
 ---
 
@@ -279,12 +279,12 @@ They go into <code>general/</code>. You can manually re-classify after migration
 
 <details>
 <summary><strong>Can I add new memory after migration?</strong></summary>
-Yes. Create new .md files in the appropriate domain directory and re-run the indexing step.
+Yes. Create new .md files in the appropriate domain directory and re-run the indexing step to update the branch indexes.
 </details>
 
 <details>
 <summary><strong>Does this work with non-OpenClaw agents?</strong></summary>
-Yes. If your agent uses a flat file for persistent memory that gets loaded into context on boot, Memory Tree reduces that token load. The instructions are framework-agnostic.
+Yes. If your agent uses a flat file for persistent memory that gets loaded into context on boot, Bonsai Memory reduces that token load. The instructions are framework-agnostic.
 </details>
 
 <details>
@@ -296,7 +296,7 @@ Below ~1,000 tokens, the overhead of the directory structure isn't worth the sav
 
 ## Contributing
 
-Issues and PRs welcome. If you've adapted Memory Tree for another agent framework, open an issue — I'd love to hear about it.
+Issues and PRs welcome. If you've adapted Bonsai Memory for another agent framework, open an issue — I'd love to hear about it.
 
 ---
 
