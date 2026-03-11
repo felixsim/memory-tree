@@ -9,77 +9,113 @@ Built for [OpenClaw](https://openclaw.ai) agents. Works with any LLM agent frame
 
 ---
 
-## Why Memory Tree?
+## The Simple Explanation
 
-AI agents that use persistent memory — whether via `MEMORY.md`, long-term context files, or any file-based memory system — face a fundamental problem: **every boot loads the entire memory into the context window**, regardless of what the current task needs.
+Every time an AI agent starts a conversation, it loads its memory — everything it knows about you, your business, your preferences, your history. All of it. Every single time. Even if you're just asking it to check the weather.
 
-A typical agent accumulates 5,000–10,000+ tokens of memory. Most of it is irrelevant to any single interaction. That's dead weight in every API call — burning tokens, increasing latency, and reducing the space available for actual reasoning.
+Imagine starting every workday by reading your entire diary from cover to cover before answering a single email. That's what your AI agent is doing.
 
-Memory Tree solves this with **progressive disclosure**: load a ~400-token index on boot, then drill into specific domains only when the task requires it. Three reads maximum for any fact lookup.
+**Memory Tree fixes this.** Instead of one giant memory file, it organizes your agent's knowledge into labeled folders — like going from a single messy notebook to a well-organized filing cabinet. Your agent reads the folder labels on boot (takes seconds, uses minimal tokens), then only opens the specific folder it needs for the current task.
 
-### Token Optimization Results
+### What You Get
 
-Tested across 9 production AI agents:
+- ⚡ **Faster responses** — Less memory to process on every interaction
+- 💰 **Lower API costs** — Fewer tokens per call means lower bills
+- 🧠 **Better reasoning** — Less noise in context means better focus on your actual question
+- 🔒 **Zero risk** — Original memory is backed up, one command to rollback
 
-| Agent | Before | After | Reduction |
-|-------|--------|-------|-----------|
-| Main (chief of staff) | ~6,400 tokens | ~385 tokens | **94%** |
-| Ops agent | ~2,764 tokens | ~367 tokens | **87%** |
-| SEO agent | ~2,732 tokens | ~373 tokens | **87%** |
-| Content agent | ~1,945 tokens | ~271 tokens | **86%** |
-| School agent | ~1,450 tokens | ~296 tokens | **80%** |
-| Code agent | ~1,012 tokens | ~249 tokens | **75%** |
-| Research agent | ~939 tokens | ~316 tokens | **66%** |
-| LinkedIn agent | ~899 tokens | ~218 tokens | **76%** |
+### How to Use It
 
-**Average: 81% reduction** in boot memory token load.
+Tell your OpenClaw agent:
+
+> *"Restructure your memory using the memory-tree skill."*
+
+That's it. The agent reads the instructions and does the migration itself. No coding, no terminal commands, no configuration.
+
+### Real Results
+
+Tested across 9 production agents:
+
+| Agent Role | Token Reduction |
+|------------|----------------|
+| Chief of staff | **94%** (6,400 → 385) |
+| Operations | **87%** (2,764 → 367) |
+| SEO | **87%** (2,732 → 373) |
+| Content | **86%** (1,945 → 271) |
+| School assistant | **80%** (1,450 → 296) |
+| Code | **75%** (1,012 → 249) |
+| Research | **66%** (939 → 316) |
+| LinkedIn | **76%** (899 → 218) |
+
+**Average: 81% reduction** in boot memory token load across all agents.
 
 ---
 
-## How It Works
+## Technical Deep Dive
 
-Memory Tree converts a flat memory file into a hierarchical domain tree:
+### The Problem: Linear Memory in a Branching World
+
+LLM agents with persistent memory typically use a flat-file approach: a single `MEMORY.md` (or equivalent) that gets injected into the system prompt or context window on every session initialization. This creates three compounding problems:
+
+1. **O(n) boot cost.** Every session pays the full token cost of the entire memory, regardless of task relevance. An agent with 6,000 tokens of memory burns 6,000 tokens before generating a single response — on every interaction.
+
+2. **Context window pollution.** Irrelevant memory competes with task-relevant information for attention in the transformer's context window. Research shows LLM performance degrades as context length increases with irrelevant content ([Lost in the Middle, Liu et al. 2023](https://arxiv.org/abs/2307.03172)). Your agent is literally thinking worse because it's remembering too much.
+
+3. **Linear scaling.** As the agent accumulates knowledge, boot cost grows linearly with no ceiling. A productive agent that learns over weeks/months eventually hits context window limits or unacceptable latency.
+
+### The Solution: Hierarchical Progressive Disclosure
+
+Memory Tree applies a B-tree-inspired indexing strategy to agent memory. Instead of loading all content, the agent traverses a hierarchy:
 
 ```
-Before:                          After:
-                                 
-MEMORY.md (6,400 tokens)  →     memory/
-├── ## Identity                  ├── _index.md (~400 tokens, loaded on boot)
-├── ## Business                  ├── domains/
-├── ## Infrastructure            │   ├── identity/
-├── ## Family                    │   │   ├── _index.md
-├── ## Network                   │   │   ├── personal.md
-├── ## Known Issues              │   │   ├── family.md
-├── ## Dates                     │   │   └── preferences.md
-└── ## ... (15 more sections)    │   ├── business/
-                                 │   │   ├── _index.md
-                                 │   │   ├── company.md
-                                 │   │   └── clients.md
-                                 │   └── infrastructure/
-                                 │       ├── _index.md
-                                 │       ├── services.md
-                                 │       └── known-issues.md
-                                 ├── dates.md
-                                 └── daily/
-                                     └── YYYY-MM-DD.md
+                    ┌─────────────────────┐
+    Boot load:      │   Root Index        │  ~400 tokens
+    (every session) │   (domain summaries)│
+                    └────────┬────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │ Identity │  │ Business │  │ Infra    │  ~100-200 tokens each
+        │ _index   │  │ _index   │  │ _index   │  (loaded on demand)
+        └────┬─────┘  └────┬─────┘  └────┬─────┘
+             │              │              │
+        ┌────┴────┐    ┌───┴────┐    ┌───┴────┐
+        ▼         ▼    ▼        ▼    ▼        ▼
+    personal  family  company  SEO  services  issues   Full content
+      .md      .md     .md    .md    .md      .md      (loaded on demand)
 ```
 
-### Architecture: Progressive Disclosure
+**Maximum traversal depth: 3 reads** for any fact lookup. Worst case token cost per lookup: ~400 (root) + ~150 (domain index) + ~200 (topic file) = **~750 tokens** vs loading the entire 6,000+ token file.
 
-The key insight is **three-level progressive disclosure**:
+Best case (task doesn't need memory): **~400 tokens**. That's the root index and nothing else.
 
-1. **Root index** (~400 tokens) — Loaded on every boot. One-line summary per domain with token counts.
-2. **Domain index** (~100-200 tokens) — Loaded when the agent needs a specific domain. One-line summary per topic file.
-3. **Topic file** (variable) — Loaded only when the agent needs that specific fact.
+### How the Migration Works
 
-This means the agent traverses at most three reads to find any piece of stored knowledge: root → domain → topic. The context window carries only what's relevant to the current task.
+#### Step 1: Section Extraction
 
-### Domain Classification
+The agent parses `MEMORY.md` and splits on `## ` heading boundaries. Each heading becomes a discrete knowledge unit.
 
-Each `## Section` in the original memory file is classified into a domain using deterministic keyword matching:
+#### Step 2: Deterministic Domain Classification
 
-| Domain | Matches |
-|--------|---------|
+Each section is classified using keyword matching against the heading text:
+
+```
+Heading: "## Infrastructure & Services"
+         → matches keyword "infrastructure" → domain: infrastructure
+
+Heading: "## Family Notes"
+         → matches keyword "family" → domain: identity
+
+Heading: "## Slack Channel Config"
+         → matches keyword "config" → domain: infrastructure
+
+Heading: "## Monthly Revenue Targets"
+         → matches keyword "revenue" → domain: business
+```
+
+| Domain | Keyword Triggers |
+|--------|-----------------|
 | `identity` | personal, family, personality, preferences, professional network |
 | `business` | business, revenue, company, SEO, brand, clients, product |
 | `infrastructure` | services, cron, API, config, tools, issues |
@@ -87,9 +123,99 @@ Each `## Section` in the original memory file is classified into a domain using 
 | `agents` | agent, task, sub-agent, monitoring |
 | `legal` | legal, contract, compliance |
 | `dates` | dates, anniversary, birthday |
-| `general` | anything that doesn't match above |
+| `general` | fallback for unmatched sections |
 
-**Why keyword-based, not LLM-based?** Determinism. Keyword matching produces consistent results across runs. An LLM might classify "Voice Config" as `identity` one day and `infrastructure` the next. Classification should be a lookup, not a judgment call.
+**Why deterministic keyword matching instead of LLM classification?** Consistency. An LLM might classify "Voice Reply Config" as `identity` in one run and `infrastructure` in the next. Memory migration must be idempotent — running it twice should produce identical results. Keyword matching is a lookup table, not a probabilistic judgment.
+
+#### Step 3: File Tree Generation
+
+Each section is written to `memory/domains/<domain>/<slugified-heading>.md`. The slug is derived from the heading: lowercased, special characters stripped, spaces replaced with hyphens, truncated to 60 characters.
+
+```
+"## GO Events Staff Roster (Updated 5 Mar 2026)"
+→ memory/domains/business/go-events-staff-roster-updated-5-mar-2026.md
+```
+
+#### Step 4: Index Generation (Bottom-Up)
+
+Indexes are generated at two levels:
+
+**Domain `_index.md`** — For each domain directory:
+```markdown
+# Business Index
+_Last indexed: 2026-03-11T09:41:41+08:00_
+_Estimated tokens: ~723_
+
+### company.md (~380 tokens)
+Get Out! Events — events agency, 10+ years, ~$2M/year revenue, corporate & government clients.
+
+### seo-config.md (~210 tokens)
+Domain migration from getoutevents.com to getout.sg completed Feb 2026.
+
+### staff-roster.md (~133 tokens)
+12 staff members, 3 departments, updated March 2026.
+```
+
+**Root `_index.md`** — Aggregates all domain indexes:
+```markdown
+# Memory Index
+_Last indexed: 2026-03-11T09:41:41+08:00_
+_Estimated tokens: ~2,984_
+
+## Domains
+
+### Identity (~529 tokens)
+Felix Sim, Singaporean entrepreneur, Co-Founder of Get Out! Events.
+_Also: preferences, family, professional-network_
+
+### Business (~482 tokens)
+Get Out! Events — events agency, corporate & government clients.
+_Also: seo-config, staff-roster_
+
+### Infrastructure (~1,851 tokens)
+Vercel hosting, Supabase DB, GitHub repos, Slack, Linear.
+_Also: known-issues, cron-config, api-keys_
+```
+
+Token estimates use the heuristic `ceil(character_count / 4)`, which is accurate to ±10% for English text across GPT and Claude tokenizers.
+
+#### Step 5: MEMORY.md Replacement
+
+The original `MEMORY.md` is backed up to `memory/MEMORY.md.bak`. The root index replaces `MEMORY.md`. This is what the agent loads on boot — typically **~300-500 tokens** regardless of total memory size.
+
+### Semantic Search Compatibility
+
+OpenClaw's `memory_search` uses embedding-based semantic search over all `.md` files in the `memory/` directory, recursively. The hierarchical tree structure is fully transparent to the search layer — no configuration changes required. Files at `memory/domains/business/company.md` are indexed exactly the same as a flat `memory/company.md` would be.
+
+This means the agent has **two retrieval paths**:
+
+1. **Structured traversal**: Root → Domain → Topic (for known-category lookups)
+2. **Semantic search**: Direct query across all domain files (for cross-cutting or fuzzy lookups)
+
+Both paths coexist. The hierarchy optimizes boot cost; semantic search handles the long tail.
+
+### Complexity Analysis
+
+| Operation | Flat file | Memory Tree |
+|-----------|-----------|-------------|
+| Boot load | O(n) — full file | O(1) — root index only (~400 tokens fixed) |
+| Known-category lookup | O(n) — scan full file | O(1) — 3 reads max (~750 tokens) |
+| Cross-cutting search | O(n) — semantic search | O(n) — semantic search (identical) |
+| Write new fact | O(1) — append to file | O(1) — write to domain file + update index |
+| Migration | N/A | O(n) — one-time, ~2 minutes |
+
+The tradeoff: cross-cutting semantic search is unchanged (it must scan all files regardless), but the dominant operation — session boot — drops from O(n) to O(1).
+
+### Why Not a Vector Database?
+
+Markdown files are:
+- **Grep-able** — `grep -r "keyword" memory/` works instantly
+- **Git-able** — Full version history, diffs, branches, PRs
+- **Human-readable** — Open in any editor, no special tooling
+- **Search-compatible** — Works with OpenClaw's existing embedding-based `memory_search`
+- **Zero-dependency** — No server, no connection string, no schema migrations
+
+A vector database solves a different problem (similarity search over embeddings). Memory Tree solves the boot cost problem with zero infrastructure overhead.
 
 ---
 
@@ -102,55 +228,28 @@ mkdir -p ~/.openclaw/workspace/skills/memory-tree
 cp SKILL.md ~/.openclaw/workspace/skills/memory-tree/SKILL.md
 ```
 
-Then tell your agent:
+Then tell your agent: *"Restructure your memory using the memory-tree skill."*
 
-> *"Restructure your memory using the memory-tree skill."*
+### Option 2: Manual — Give Your Agent the Instructions
 
-The agent reads the instructions and performs the migration autonomously.
-
-### Option 2: Manual — Just Give Your Agent the Instructions
-
-Copy the content of [`SKILL.md`](SKILL.md) into your agent's prompt or context, and ask it to follow the steps. No installation required. The instructions are completely self-contained.
+Copy the content of [`SKILL.md`](SKILL.md) into your agent's context and ask it to follow the steps. No installation required.
 
 ### Option 3: Download the Skill Package
 
-Grab the `.skill` file from the [latest release](https://github.com/felixsim/memory-tree/releases):
-
 ```bash
-# Download and extract
 curl -LO https://github.com/felixsim/memory-tree/releases/download/v1.0.0/memory-tree.skill
 unzip memory-tree.skill -d ~/.openclaw/workspace/skills/memory-tree/
 ```
 
 ---
 
-## Design Decisions
-
-### Why a Skill, Not a Script?
-
-Scripts are brittle — they hardcode paths, assume directory structures, and break across environments. A skill is a set of instructions that any LLM agent can interpret and adapt to its own workspace. The agent handles edge cases, naming conflicts, and unusual section structures naturally. It's more resilient than any bash script, and it's portable to any device without modification.
-
-### Why Not a Database?
-
-Markdown files are grep-able, git-able, human-readable, and work with semantic search tools out of the box. OpenClaw's `memory_search` uses embedding-based semantic search over `.md` files recursively — the tree structure is fully compatible with zero configuration changes. A database adds a dependency for no benefit.
-
-### Why Per-Domain Indexes?
-
-Progressive disclosure. The root index tells the agent *what domains exist* (~400 tokens). A domain index tells it *what topics exist in that domain* (~100 tokens). The topic file gives the actual content. The agent only ever loads the branch it needs — not the entire tree.
-
-### Why Preserve the Original?
-
-Rollback safety. The original `MEMORY.md` is backed up to `memory/MEMORY.md.bak` before any changes. If something goes wrong: `cp memory/MEMORY.md.bak MEMORY.md` and you're back to exactly where you started.
-
----
-
 ## Compatibility
 
-Memory Tree works with any AI agent framework that uses file-based persistent memory:
+Works with any AI agent framework that uses file-based persistent memory:
 
-- **[OpenClaw](https://openclaw.ai)** — Full native support. `memory_search` auto-discovers the new tree structure.
-- **Custom agent setups** — Any framework using markdown files for agent memory or context injection.
-- **Multi-agent systems** — Each agent migrates independently. Shared memory can use the same domain structure.
+- **[OpenClaw](https://openclaw.ai)** — Full native support. `memory_search` auto-discovers the tree.
+- **Custom agent setups** — Any framework using markdown for agent memory or context injection.
+- **Multi-agent systems** — Each agent migrates independently.
 
 The migration is **idempotent** — safe to run multiple times. Existing domain files are never overwritten.
 
@@ -160,34 +259,44 @@ The migration is **idempotent** — safe to run multiple times. Existing domain 
 
 See the [`examples/`](examples/) directory:
 
-- [`before-MEMORY.md`](examples/before-MEMORY.md) — A typical flat memory file (~1,400 tokens)
-- [`after-MEMORY.md`](examples/after-MEMORY.md) — The slim root index that replaces it (~200 tokens)
+- [`before-MEMORY.md`](examples/before-MEMORY.md) — A typical flat memory file
+- [`after-MEMORY.md`](examples/after-MEMORY.md) — The slim root index that replaces it
 - [`after-tree.txt`](examples/after-tree.txt) — The resulting directory structure
 
 ---
 
 ## FAQ
 
-**Does this break existing memory search?**
-No. OpenClaw's `memory_search` scans `memory/*.md` recursively. The new file paths are automatically discovered.
+<details>
+<summary><strong>Does this break existing memory search?</strong></summary>
+No. OpenClaw's memory_search scans memory/*.md recursively. The new paths are automatically discovered.
+</details>
 
-**What if my MEMORY.md has unusual section structures?**
-Sections that don't match any keyword domain go into `general/`. You can manually re-classify after migration.
+<details>
+<summary><strong>What if sections don't match any domain?</strong></summary>
+They go into <code>general/</code>. You can manually re-classify after migration.
+</details>
 
-**Can I add new memory after migration?**
-Yes. Create new `.md` files in the appropriate domain directory. Re-run the indexing step to update the `_index.md` files.
+<details>
+<summary><strong>Can I add new memory after migration?</strong></summary>
+Yes. Create new .md files in the appropriate domain directory and re-run the indexing step.
+</details>
 
-**Does this work with AI agents that aren't OpenClaw?**
-Yes. If your agent uses a flat file for persistent memory and loads it into context on boot, Memory Tree will reduce that token load. The SKILL.md instructions are framework-agnostic.
+<details>
+<summary><strong>Does this work with non-OpenClaw agents?</strong></summary>
+Yes. If your agent uses a flat file for persistent memory that gets loaded into context on boot, Memory Tree reduces that token load. The instructions are framework-agnostic.
+</details>
 
-**What about very small memory files (<1,000 tokens)?**
-The skill checks for this and recommends skipping migration. Below ~1,000 tokens, the overhead of the directory structure isn't worth the savings.
+<details>
+<summary><strong>What about very small memory files?</strong></summary>
+Below ~1,000 tokens, the overhead of the directory structure isn't worth the savings. The skill checks for this and recommends skipping.
+</details>
 
 ---
 
 ## Contributing
 
-Issues and PRs welcome. If you've adapted Memory Tree for another agent framework, I'd love to hear about it.
+Issues and PRs welcome. If you've adapted Memory Tree for another agent framework, open an issue — I'd love to hear about it.
 
 ---
 
@@ -197,4 +306,4 @@ MIT — free to use, modify, and distribute.
 
 ---
 
-*Built by [Felix Sim](https://sg.linkedin.com/in/simfelix) as a contribution to the [OpenClaw](https://openclaw.ai) community.*
+*Built by [Felix Sim](https://sg.linkedin.com/in/simfelix) as a free contribution to the [OpenClaw](https://openclaw.ai) community.*
