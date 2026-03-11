@@ -1,0 +1,19 @@
+memory/
+├── _index.md                          ← root summary (~180 tokens)
+├── MEMORY.md.bak                      ← original backup
+├── domains/
+│   ├── identity/
+│   │   ├── _index.md                  ← domain summary
+│   │   ├── key-identity-facts.md      ← from "## Key Identity Facts"
+│   │   ├── personality-preferences.md ← from "## Personality & Preferences"
+│   │   └── family-notes.md            ← from "## Family Notes"
+│   ├── business/
+│   │   ├── _index.md
+│   │   └── business-context.md        ← from "## Business Context"
+│   └── infrastructure/
+│       ├── _index.md
+│       ├── infrastructure-services.md ← from "## Infrastructure & Services"
+│       └── known-issues.md            ← from "## Known Issues"
+├── dates.md                           ← from "## Dates to Remember"
+└── daily/
+    └── (daily logs moved here)
