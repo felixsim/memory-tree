@@ -1,11 +1,27 @@
 ---
 name: memory-tree
-description: Restructure an OpenClaw agent's flat MEMORY.md into a hierarchical domain-based memory tree. Cuts boot token load by 70-95%. Use when an agent's MEMORY.md exceeds ~1,000 tokens, or when told to "upgrade memory", "restructure memory", "implement memory tree", or "reduce memory token usage". Works on any OpenClaw workspace — no scripts or config needed.
+description: Restructure a flat MEMORY.md into a self-maintaining hierarchical memory tree. v2 adds automated reindexing, health monitoring, archive/purge lifecycle, and LLM reflection staging. Cuts boot token load by 70-95%.
 ---
 
 # Memory Tree
 
 Restructure a flat MEMORY.md into a hierarchical `memory/domains/` tree with auto-generated indexes. The agent reads a ~300-500 token root index on boot instead of the full file. Detailed content is searched on-demand via `memory_search`.
+
+## Version
+- v1.0 — Initial release. One-time migration tool.
+- v2.0 — Living memory system. Adds 5 automated scripts, cron scheduling, health monitoring, archive/purge lifecycle, and LLM reflection staging.
+
+## v2 Improvements
+
+| Capability | v1 | v2 |
+|---|---|---|
+| Initial migration | ✅ Manual | ✅ Preserved |
+| Reindexing | ❌ Manual | ✅ Auto every 6h (cron) |
+| Memory health check | ❌ None | ✅ Status check every 6h |
+| Stale entry cleanup | ❌ Never | ✅ Archive → 180d purge |
+| general/ domain rot | ❌ Grows forever | ✅ 30-day max age enforced |
+| LLM reflection staging | ❌ Never | ✅ Via _reflect_staging.json |
+| Operational state | ❌ None | ✅ _meta.json + _stats.json |
 
 ## When to Run
 - MEMORY.md exceeds ~1,000 tokens (~4KB)
@@ -17,11 +33,15 @@ Restructure a flat MEMORY.md into a hierarchical `memory/domains/` tree with aut
 ```
 memory/
 ├── _index.md              # Root summary (~300-500 tokens) — replaces MEMORY.md
+├── _meta.json             # { last_reindex, domain_count, total_tokens, script_version }
+├── _stats.json            # { domains: { <name>: { files, tokens } }, general_age_violations }
+├── _reflect_staging.json  # (ephemeral) LLM reflection candidates — agent processes and deletes
+├── _purge_log.json        # Audit log of purged files
 ├── domains/
 │   ├── <domain>/
 │   │   ├── _index.md      # Domain summary (auto-generated)
 │   │   ├── topic-a.md     # One ## section from old MEMORY.md
-│   │   └── topic-b.md
+│   │   └── topic-b__DELETE.md  # Archived — queued for 180d purge
 │   └── <domain>/
 │       └── ...
 ├── dates.md               # Cross-cutting dates (if present)
@@ -30,7 +50,9 @@ memory/
     └── ...
 ```
 
-## Step-by-Step Instructions
+---
+
+## Step-by-Step Instructions (Initial Migration — v1)
 
 ### 1. Audit Current State
 
@@ -142,9 +164,209 @@ This is what gets loaded on boot — ~300-500 tokens instead of the full file.
 3. Test `memory_search` for a known fact — it should find content in the new paths
 4. Confirm MEMORY.md is now under ~500 tokens
 
-### 10. Re-index (Ongoing)
+---
 
-After editing any domain file, regenerate that domain's `_index.md` and the root index. Keep token estimates current.
+## v2 Scripts
+
+Five shell scripts live in `skills/bonsai-memory/scripts/`. Install them once; run via cron or manually.
+
+### bonsai-reindex.sh — Rebuild Index
+
+Scans all domain files, regenerates `_index.md` for each domain, regenerates `memory/_index.md`, updates `MEMORY.md`, and writes `_meta.json` + `_stats.json`. No LLM required.
+
+```bash
+# Basic usage (uses ~/workspace by default)
+bash skills/bonsai-memory/scripts/bonsai-reindex.sh
+
+# Custom workspace
+bash skills/bonsai-memory/scripts/bonsai-reindex.sh /path/to/workspace
+
+# Via env var
+BONSAI_WORKSPACE=/path/to/workspace bash skills/bonsai-memory/scripts/bonsai-reindex.sh
+```
+
+**Output:**
+```
+Reindexed 24 files across 5 domains (3840 tokens)
+```
+
+**Writes:**
+- `memory/_meta.json` — `{ last_reindex, domain_count, total_tokens, script_version }`
+- `memory/_stats.json` — `{ domains: { <name>: { files, tokens } }, general_age_violations }`
+- `memory/_index.md` — root summary
+- `memory/domains/<domain>/_index.md` — per-domain summaries
+- `MEMORY.md` — updated with root index
+
+---
+
+### bonsai-status.sh — Health Check
+
+Reads `_meta.json` and `_stats.json`, runs live checks on the filesystem, prints a clean status report. No LLM required.
+
+```bash
+bash skills/bonsai-memory/scripts/bonsai-status.sh
+```
+
+**Output:**
+```
+🌿 Bonsai Status
+──────────────────────────────
+Last reindex:  2h 15m ago (2026-03-15T06:00:00Z)
+Total memory:  3840 tokens across 5 domains
+general/ violations: 0 files older than 30d
+Pending purge: none
+──────────────────────────────
+Status: HEALTHY
+```
+
+**Exit codes:**
+- `0` = HEALTHY
+- `1` = WARNING (overdue reindex, violations, pending purge, or staging file present)
+- `2` = CRITICAL (5+ general violations)
+
+---
+
+### bonsai-migrate.sh — Move Files Between Domains
+
+Moves a memory file from one domain to another, updates frontmatter `domain:` field, then triggers reindex.
+
+```bash
+bash skills/bonsai-memory/scripts/bonsai-migrate.sh <SOURCE_FILE> <DEST_DOMAIN> [WORKSPACE]
+```
+
+**Examples:**
+```bash
+# Move a general/ file into business domain
+bash skills/bonsai-memory/scripts/bonsai-migrate.sh \
+  memory/domains/general/go-events-pricing.md business
+
+# With explicit workspace
+bash skills/bonsai-memory/scripts/bonsai-migrate.sh \
+  memory/domains/general/some-topic.md infrastructure /path/to/workspace
+```
+
+**What it does:**
+1. Validates source file exists and dest differs from source domain
+2. Updates or inserts `domain: <DEST_DOMAIN>` in frontmatter
+3. Moves the file to `memory/domains/<DEST_DOMAIN>/`
+4. Runs `bonsai-reindex.sh` automatically
+
+---
+
+### bonsai-reflect.sh — Stage LLM Reflection
+
+Phase 1 (cheap, no LLM): Scans `_stats.json` and the filesystem for candidates that need agent review. Writes `_reflect_staging.json` as a sentinel file for an agent to pick up.
+
+**Candidates are flagged when:**
+- `general/` files are older than 15 days (should be migrated to a proper domain)
+- A domain has >20 files (may need splitting)
+- A domain has >500 tokens (may need pruning)
+- An individual file has >500 tokens (oversized)
+
+```bash
+bash skills/bonsai-memory/scripts/bonsai-reflect.sh
+```
+
+**Output:**
+```
+Reflection staged: 7 candidates written to _reflect_staging.json
+Run your agent now to process the reflection staging file.
+
+Agent instructions:
+  1. Read memory/_reflect_staging.json
+  2. For each candidate: decide keep / migrate / archive (prefix with __DELETE)
+  3. Run bonsai-reindex.sh after all decisions
+  4. Delete _reflect_staging.json when done
+```
+
+**`_reflect_staging.json` format:**
+```json
+{
+  "triggered_at": "2026-03-15T08:00:00Z",
+  "candidates": [
+    {
+      "file": "memory/domains/general/old-note.md",
+      "domain": "general",
+      "age_days": 22,
+      "tokens": 120,
+      "reason": "general/ file older than 15 days (22d)"
+    }
+  ]
+}
+```
+
+---
+
+### bonsai-purge.sh — True Deletion After Grace Period
+
+Finds all files with `__DELETE` suffix in `memory/domains/`. Only deletes if older than 180 days. Logs purged files to `_purge_log.json`.
+
+```bash
+bash skills/bonsai-memory/scripts/bonsai-purge.sh
+```
+
+**Output:**
+```
+Skipping old-note__DELETE.md — 134 days remaining
+Purged: ancient-note__DELETE.md (184d old)
+
+Purge log updated: memory/_purge_log.json
+
+Purged 1 files. 1 files still in grace period.
+```
+
+**Archive workflow:**
+1. Agent decides to archive a file → rename it: `some-topic.md` → `some-topic__DELETE.md`
+2. `bonsai-purge.sh` runs weekly, checks mtime — skips if <180 days old
+3. After 180 days, the file is permanently deleted and logged
+
+---
+
+## Cron Setup
+
+Run these cron jobs to keep memory automatically maintained:
+
+```bash
+# Add to crontab (crontab -e):
+0 */6 * * * bash ~/workspace/skills/bonsai-memory/scripts/bonsai-reindex.sh
+30 */6 * * * bash ~/workspace/skills/bonsai-memory/scripts/bonsai-status.sh
+0 2 * * 0 bash ~/workspace/skills/bonsai-memory/scripts/bonsai-purge.sh
+```
+
+**Schedule breakdown:**
+- **bonsai-reindex.sh** — every 6 hours at :00 (keeps index fresh)
+- **bonsai-status.sh** — every 6 hours at :30 (health check 30m after reindex)
+- **bonsai-purge.sh** — Sundays at 2am (weekly cleanup)
+
+**Optional: Weekly reflection staging**
+```bash
+# Run reflect every Sunday at 3am to queue candidates for agent review
+0 3 * * 0 bash ~/workspace/skills/bonsai-memory/scripts/bonsai-reflect.sh
+```
+
+---
+
+## Reflection Workflow
+
+When `bonsai-reflect.sh` runs, it writes `memory/_reflect_staging.json`. On next boot (or when the agent checks status), it should notice this file and process it.
+
+**Agent steps when `_reflect_staging.json` exists:**
+
+1. **Read** `memory/_reflect_staging.json` — get the candidates list
+2. **For each candidate**, decide one of three actions:
+   - **keep** — leave the file as-is (it belongs where it is)
+   - **migrate** — run `bonsai-migrate.sh <file> <dest-domain>` to move it to a better domain
+   - **archive** — rename the file with `__DELETE` suffix (e.g., `old-note.md` → `old-note__DELETE.md`); it enters the 180-day grace period before `bonsai-purge.sh` removes it permanently
+3. **Run** `bonsai-reindex.sh` after all decisions to regenerate indexes
+4. **Delete** `_reflect_staging.json` when done
+
+**Decision heuristics:**
+- `general/` files >15 days: try to classify into a real domain; if not classifiable, archive
+- Oversized domains (>20 files): look for natural sub-groupings to split into a subdomain
+- Oversized files (>500 tokens): consider splitting into multiple files by sub-topic
+- If a file's content is no longer relevant → archive (never hard-delete directly)
+
+---
 
 ## Rules
 
@@ -153,6 +375,10 @@ After editing any domain file, regenerate that domain's `_index.md` and the root
 - **Idempotent.** If domain files already exist, skip them — don't overwrite.
 - **`memory_search` compatibility.** OpenClaw's memory_search scans `memory/*.md` recursively. The tree structure is fully compatible — no config changes needed.
 - **Daily logs stay simple.** Just move to `memory/daily/`, don't restructure them.
+- **Archive before delete.** Never hard-delete memory files directly. Always rename with `__DELETE` suffix first and let `bonsai-purge.sh` handle final deletion after 180 days.
+- **general/ domain is a staging area, not a home.** Files there older than 30 days are violations. Reflect and migrate them.
+
+---
 
 ## Expected Results
 
